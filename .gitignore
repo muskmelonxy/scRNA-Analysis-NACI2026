@@ -20,3 +20,5 @@ env/
 .idea/
 # Logs
 *.log
+results/processed_adata.h5ad
+results/lr_interaction_scores.csv
