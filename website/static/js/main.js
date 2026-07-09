@@ -106,6 +106,7 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
         renderProportions();
         renderImmuneDotplots();
         updateLR();
+        updateInteractionHeatmap();
 
         toast('数据加载完成！', 'success');
     } catch (e) {
@@ -582,6 +583,53 @@ async function updateLR() {
     }
 }
 
+async function updateInteractionHeatmap() {
+    const sample = $('inter-sample').value;
+    try {
+        let url = '/api/interaction_summary';
+        if (sample) url += `?sample=${sample}`;
+        const data = await fetchJSON(url);
+
+        if (!data.length) return;
+
+        // Aggregate by sender & receiver
+        const strength = {};
+        const cts = STATE.ctOrder;
+        cts.forEach(s => { strength[s] = {}; cts.forEach(r => { strength[s][r] = 0; }); });
+        data.forEach(d => {
+            if (strength[d.sender] && strength[d.sender][d.receiver] !== undefined) {
+                strength[d.sender][d.receiver] += d.total_strength || d.count || 0;
+            }
+        });
+
+        const z = cts.map(s => cts.map(r => strength[s][r] || 0));
+        const maxVal = Math.max(...z.flat()) || 1;
+
+        const traces = [{
+            z: z,
+            x: cts, y: cts,
+            type: 'heatmap',
+            colorscale: 'YlOrRd',
+            zmin: 0, zmax: maxVal,
+            text: z.map(row => row.map(v => v.toFixed(1))),
+            texttemplate: '%{text}',
+            textfont: {size: 9},
+            hovertemplate: 'Sender: %{y}<br>Receiver: %{x}<br>Score: %{z:.2f}<extra></extra>'
+        }];
+        const layout = {
+            title: `${sample || 'All'} — Cell-Cell Communication Strength`,
+            height: 340,
+            margin: {l:80,r:30,t:40,b:80},
+            xaxis: {title:'Receiver', tickangle: -30},
+            yaxis: {title:'Sender', autorange:'reversed'},
+            paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)'
+        };
+        Plotly.newPlot('plot-inter-heatmap', traces, layout, {responsive:true});
+    } catch(e) {
+        $('plot-inter-heatmap').innerHTML = '<div class="loading">通讯数据不可用</div>';
+    }
+}
+
 // ================================================================
 // TAB 7: CUSTOM ANALYSIS
 // ================================================================
@@ -697,4 +745,240 @@ async function downloadTable(type) {
         }
         toast('表格下载完成', 'success');
     } catch(e) { toast('下载失败: ' + e.message, 'error'); }
+}
+
+// ================================================================
+// TAB 7: PSEUDOTIME
+// ================================================================
+let pseudotimeData = null;
+
+async function updatePseudotime() {
+    const colorBy = $('pt-color').value;
+    try {
+        if (!pseudotimeData) {
+            pseudotimeData = await fetchJSON('/api/pseudotime');
+        }
+        const d = pseudotimeData;
+
+        let colors, title;
+        if (colorBy === 'dpt_pseudotime_norm') {
+            colors = d.dpt_pseudotime_norm;
+            title = 'Pseudotime';
+        } else if (colorBy === 'cell_type') {
+            colors = d.cell_type.map(ct => CT_COLORS[ct] || '#999');
+            title = 'Cell Type';
+        } else {
+            colors = d.sample.map(s => SAMPLE_COLORS[s] || '#999');
+            title = 'Sample';
+        }
+
+        const trace = {
+            x: d.UMAP_1, y: d.UMAP_2,
+            mode: 'markers', type: 'scattergl',
+            marker: {
+                size: 3,
+                color: colors,
+                colorscale: colorBy === 'dpt_pseudotime_norm' ? 'Viridis' : undefined,
+                showscale: colorBy === 'dpt_pseudotime_norm',
+                colorbar: colorBy === 'dpt_pseudotime_norm' ? {title:'Pseudotime', thickness:15} : undefined,
+                opacity: 0.7
+            },
+            text: d.barcode.map((b,i) =>
+                `${b}<br>Type: ${d.cell_type[i]}<br>Sample: ${d.sample[i]}<br>PT: ${d.dpt_pseudotime_norm[i].toFixed(3)}`),
+            hoverinfo: 'text'
+        };
+        const layout = {
+            title: `UMAP colored by ${title}`,
+            height: 470,
+            margin: {l:50,r:30,t:40,b:50},
+            xaxis: {title:'UMAP 1', showgrid:false, zeroline:false},
+            yaxis: {title:'UMAP 2', showgrid:false, zeroline:false},
+            paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)'
+        };
+        Plotly.newPlot('plot-pt-umap', [trace], layout, {responsive:true});
+
+        // Also render PAGA
+        renderPAGA();
+    } catch(e) {
+        toast('Pseudotime加载失败: ' + e.message, 'error');
+    }
+}
+
+async function renderPAGA() {
+    try {
+        const paga = await fetchJSON('/api/paga');
+        const clusters = paga.clusters;
+        const conn = paga.connectivity;
+        const labels = paga.labels;
+
+        // Build edge traces: show connections between clusters
+        const edgeTraces = [];
+        for (let i = 0; i < clusters.length; i++) {
+            for (let j = i + 1; j < clusters.length; j++) {
+                const w = conn[i][j];
+                if (w > 0.01) {
+                    // We'll just use a scatter plot for nodes and lines
+                }
+            }
+        }
+
+        // Get cluster positions on the diffusion map or use circular layout
+        // For simplicity, use cluster average UMAP positions
+        const meta = STATE.cellMeta;
+        const ctMap = {};
+        meta.barcode.forEach((b, i) => {
+            const cl = meta.leiden[i];
+            if (!ctMap[cl]) ctMap[cl] = {x:[], y:[], label: ''};
+            ctMap[cl].x.push(meta.UMAP_1[i]);
+            ctMap[cl].y.push(meta.UMAP_2[i]);
+            ctMap[cl].label = cl;
+        });
+
+        const nodeX = [];
+        const nodeY = [];
+        const nodeLabels = [];
+        const nodeColors = [];
+        for (const [cl, v] of Object.entries(ctMap)) {
+            if (clusters.includes(cl)) {
+                nodeX.push(v.x.reduce((a,b)=>a+b,0) / v.x.length);
+                nodeY.push(v.y.reduce((a,b)=>a+b,0) / v.y.length);
+                nodeLabels.push('Cluster ' + cl + '\n' + (paga.labels[clusters.indexOf(cl)] || ''));
+                nodeColors.push('#4C72B0');
+            }
+        }
+
+        // Edge lines
+        const edgeX = []; const edgeY = [];
+        for (let i = 0; i < clusters.length; i++) {
+            for (let j = i + 1; j < clusters.length; j++) {
+                const w = conn[i][j];
+                if (w > 0.05 && i < nodeX.length && j < nodeX.length) {
+                    edgeX.push(nodeX[i], nodeX[j], null);
+                    edgeY.push(nodeY[i], nodeY[j], null);
+                }
+            }
+        }
+
+        const lineTrace = {
+            x: edgeX, y: edgeY,
+            mode: 'lines',
+            line: {color: '#95A5A6', width: 1.5},
+            hoverinfo: 'none',
+            showlegend: false
+        };
+        const nodeTrace = {
+            x: nodeX, y: nodeY,
+            mode: 'markers+text',
+            marker: {size: 20, color: nodeColors, line: {color:'white', width:2}},
+            text: nodeLabels,
+            textposition: 'top center',
+            textfont: {size: 9},
+            hoverinfo: 'text',
+            showlegend: false
+        };
+
+        const layout = {
+            title: 'PAGA Trajectory Graph',
+            height: 390,
+            margin: {l:40,r:40,t:40,b:40},
+            xaxis: {showgrid:false, zeroline:false, visible:false},
+            yaxis: {showgrid:false, zeroline:false, visible:false},
+            paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+        };
+        Plotly.newPlot('plot-pt-paga', [lineTrace, nodeTrace], layout, {responsive:true});
+
+    } catch(e) {
+        console.log('PAGA render error:', e);
+        $('plot-pt-paga').innerHTML = '<div class="loading">PAGA数据不可用</div>';
+    }
+}
+
+// ================================================================
+// TAB 8: DECONVOLUTION
+// ================================================================
+let deconResult = null;
+
+async function initDeconvolution() {
+    try {
+        const ref = await fetchJSON('/api/deconvolve/reference_genes');
+        $('decon-ref-info').textContent =
+            `参考数据: ${ref.cell_types.length} 种细胞类型, ${ref.total_genes.toLocaleString()} 个基因`;
+    } catch(e) {
+        $('decon-ref-info').textContent = '参考数据不可用';
+    }
+}
+
+// Call init when loaded
+setTimeout(initDeconvolution, 1000);
+
+async function runDeconvolution() {
+    const fileInput = $('decon-file');
+    if (!fileInput.files || !fileInput.files[0]) {
+        return toast('请先上传表达矩阵文件 (CSV/TSV)', 'info');
+    }
+
+    const file = fileInput.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+
+    showLoading('plot-decon-result');
+    $('decon-download-bar').style.display = 'none';
+
+    try {
+        const resp = await fetch('/api/deconvolve', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await resp.json();
+
+        if (data.error) {
+            toast('错误: ' + data.error, 'error');
+            $('plot-decon-result').innerHTML = `<div style="color:var(--danger);padding:20px">${data.error}</div>`;
+            return;
+        }
+
+        $('plot-decon-result').innerHTML = `<img src="${data.image}" alt="Deconvolution" style="width:100%">`;
+        $('decon-download-bar').style.display = 'flex';
+        deconResult = data;
+
+        // Overlap info
+        const o = data.overlap;
+        $('decon-overlap').innerHTML =
+            `总基因数: <strong>${o.total_bulk_genes}</strong> | ` +
+            `匹配基因: <strong>${o.matched_genes}</strong> | ` +
+            `匹配率: <strong>${o.percent_matched}%</strong>`;
+
+        toast('去卷积完成！', 'success');
+    } catch(e) {
+        toast('运行失败: ' + e.message, 'error');
+    }
+}
+
+function downloadDeconImage() {
+    if (!deconResult) return;
+    const a = document.createElement('a');
+    a.href = deconResult.download_url;
+    a.download = deconResult.filename;
+    a.click();
+}
+
+async function downloadDeconCSV() {
+    if (!deconResult) return;
+    try {
+        const resp = await fetch('/api/deconvolve/csv', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({results: deconResult.results})
+        });
+        const data = await resp.json();
+        const blob = new Blob([atob(data.csv)], {type: 'text/csv;charset=utf-8;'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = data.filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        toast('CSV下载完成', 'success');
+    } catch(e) {
+        toast('下载失败: ' + e.message, 'error');
+    }
 }

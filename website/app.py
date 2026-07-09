@@ -59,6 +59,42 @@ CELLTYPE_COLORS = {
 }
 print(f"  {cell_meta.shape[0]} cells, {len(GENE_LIST)} genes, {len(CT_ORDER)} cell types")
 
+# ── Load advanced data ────────────────────────────────────
+print("Loading advanced analysis data...")
+pseudotime = None
+paga_conn = None
+interaction_summary = None
+sig_matrix = None
+sig_matrix_markers = None
+try:
+    pt_path = os.path.join(DATA_DIR, 'pseudotime.csv.gz')
+    if os.path.exists(pt_path):
+        pseudotime = pd.read_csv(pt_path)
+        print(f"  Pseudotime: {pseudotime.shape[0]} cells")
+
+    paga_path = os.path.join(DATA_DIR, 'paga_connectivity.csv')
+    if os.path.exists(paga_path):
+        paga_conn = pd.read_csv(paga_path, index_col=0)
+        print(f"  PAGA: {paga_conn.shape[0]} clusters")
+
+    inter_path = os.path.join(DATA_DIR, 'interaction_summary.csv')
+    if os.path.exists(inter_path):
+        interaction_summary = pd.read_csv(inter_path)
+        print(f"  Interaction summary: {interaction_summary.shape[0]} pairs")
+
+    sig_path = os.path.join(DATA_DIR, 'signature_matrix.csv.gz')
+    if os.path.exists(sig_path):
+        sig_matrix = pd.read_csv(sig_path, index_col=0)
+        print(f"  Signature matrix: {sig_matrix.shape[0]} genes × {sig_matrix.shape[1]} cell types")
+
+    sig_m_path = os.path.join(DATA_DIR, 'signature_matrix_markers.csv.gz')
+    if os.path.exists(sig_m_path):
+        sig_matrix_markers = pd.read_csv(sig_m_path, index_col=0)
+        print(f"  Marker sig matrix: {sig_matrix_markers.shape[0]} genes × {sig_matrix_markers.shape[1]} cell types")
+except Exception as e:
+    print(f"  Warning: advanced data load error: {e}")
+print("Done loading.")
+
 # ── Helper ────────────────────────────────────────────────
 def gini_coeff(x):
     x = np.sort(x)
@@ -433,6 +469,168 @@ def export_table():
     csv_buf.seek(0)
     b64 = base64.b64encode(csv_buf.read().encode()).decode()
     return jsonify({'csv': b64, 'filename': f'{table_type}.csv'})
+
+# ── Pseudotime ─────────────────────────────────────────────
+@app.route('/api/pseudotime')
+def api_pseudotime():
+    if pseudotime is None:
+        return jsonify({'error': 'Pseudotime not available'}), 404
+    # Merge with cell metadata
+    df = cell_meta[['barcode','cell_type','sample']].merge(pseudotime, on='barcode')
+    return jsonify(df.to_dict(orient='list'))
+
+@app.route('/api/paga')
+def api_paga():
+    if paga_conn is None:
+        return jsonify({'error': 'PAGA not available'}), 404
+    data = {
+        'clusters': [str(c) for c in paga_conn.index],
+        'connectivity': paga_conn.values.tolist(),
+        'labels': [CLUSTER_MAP.get(str(c), str(c)) for c in paga_conn.index],
+    }
+    return jsonify(data)
+
+# ── Interaction summary ───────────────────────────────────
+@app.route('/api/interaction_summary')
+def api_interaction_summary():
+    if interaction_summary is None:
+        return jsonify({'error': 'Not available'}), 404
+    sample = request.args.get('sample')
+    df = interaction_summary.copy()
+    if sample:
+        df = df[df['sample'] == sample]
+    return jsonify(df.to_dict(orient='records'))
+
+# ── Bulk RNA-seq deconvolution ────────────────────────────
+@app.route('/api/deconvolve/reference_genes')
+def api_deconvolve_reference():
+    if sig_matrix is None:
+        return jsonify({'error': 'Reference not available'}), 404
+    all_genes = sig_matrix.index.tolist()
+    markers = sig_matrix_markers.index.tolist() if sig_matrix_markers is not None else []
+    return jsonify({
+        'all_genes': all_genes[:500],  # return first 500 for preview
+        'marker_genes': markers,
+        'total_genes': len(all_genes),
+        'cell_types': sig_matrix.columns.tolist()
+    })
+
+@app.route('/api/deconvolve', methods=['POST'])
+def api_deconvolve():
+    """Upload bulk RNA-seq data and deconvolve using NNLS"""
+    if sig_matrix is None:
+        return jsonify({'error': 'Reference not available'}), 404
+
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'Empty filename'}), 400
+
+    try:
+        # Read uploaded file (CSV/TSV)
+        fname = file.filename.lower()
+        sep = '\t' if fname.endswith('.tsv') else ','
+        bulk = pd.read_csv(file, sep=sep, index_col=0)
+    except Exception as e:
+        return jsonify({'error': f'Cannot parse file: {str(e)}'}), 400
+
+    # Determine format: genes in rows or columns?
+    # Expect: genes × samples (genes as index)
+    if bulk.shape[0] < 10:
+        return jsonify({'error': 'Too few rows. Expect genes as rows, samples as columns.'}), 400
+
+    # Match genes between bulk and reference
+    ref = sig_matrix.copy()
+    common_genes = list(set(bulk.index) & set(ref.index))
+    if len(common_genes) < 50:
+        return jsonify({
+            'error': f'Only {len(common_genes)} genes matched between bulk and reference (need ≥50)'
+        }), 400
+
+    bulk_matched = bulk.loc[common_genes]
+    ref_matched = ref.loc[common_genes]
+
+    # Normalize bulk sample counts to library size (CPM-like)
+    from scipy.optimize import nnls
+    results = {}
+    for col in bulk_matched.columns:
+        bulk_vec = bulk_matched[col].values.astype(float)
+        # Normalize to sum-to-1 (relative abundance) to match reference scale
+        total = bulk_vec.sum()
+        if total > 0:
+            bulk_vec = bulk_vec / total * 1e4  # scale to CPM-like
+        else:
+            bulk_vec = bulk_vec
+
+        ref_mat = ref_matched.values.astype(float)
+        # Normalize reference columns to sum-to-1
+        ref_norm = ref_mat / (ref_mat.sum(axis=0) + 1e-10)
+
+        # NNLS: solve min ||Ax - b|| with x >= 0
+        sol, residual = nnls(ref_norm, bulk_vec)
+        # Normalize proportions to sum to 1
+        proportions = sol / (sol.sum() + 1e-10)
+
+        results[col] = {
+            prop: float(proportions[i])
+            for i, prop in enumerate(ref.columns)
+            if proportions[i] > 0.001
+        }
+
+    # Also compute a combined result (mean across samples)
+    all_props = pd.DataFrame(results).T.fillna(0)
+    all_props['_sample'] = all_props.index
+
+    # Generate a bar plot of results
+    fig, ax = plt.subplots(figsize=(max(6, len(all_props) * 0.8), 4))
+    plot_data = all_props.drop(columns=['_sample'])
+    colors = [CELLTYPE_COLORS.get(c, '#999') for c in plot_data.columns]
+    plot_data.plot(kind='bar', stacked=True, ax=ax, color=colors, edgecolor='white')
+    ax.set_ylabel('Estimated Proportion')
+    ax.set_title('Bulk Deconvolution: Cell Type Proportions', fontweight='bold')
+    ax.legend(frameon=False, bbox_to_anchor=(1, 1))
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=0)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=200, bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    uid = uuid.uuid4().hex[:8]
+    fname = f'deconv_{uid}.png'
+    with open(os.path.join(PLOTS_DIR, fname), 'wb') as f:
+        f.write(buf.getvalue())
+    img_b64 = base64.b64encode(buf.read()).decode()
+
+    # Also generate gene overlap info
+    overlap_info = {
+        'total_bulk_genes': len(bulk.index),
+        'matched_genes': len(common_genes),
+        'percent_matched': round(len(common_genes) / len(bulk.index) * 100, 1),
+    }
+
+    return jsonify({
+        'image': f'data:image/png;base64,{img_b64}',
+        'filename': fname,
+        'download_url': f'/download/{fname}',
+        'results': results,
+        'cell_types': list(ref.columns),
+        'overlap': overlap_info,
+    })
+
+@app.route('/api/deconvolve/csv', methods=['POST'])
+def api_deconvolve_csv():
+    """Return deconvolution result as CSV"""
+    data = request.json
+    results = data.get('results', {})
+    if not results:
+        return jsonify({'error': 'No results'}), 400
+    df = pd.DataFrame(results).T.fillna(0)
+    csv_buf = io.StringIO()
+    df.to_csv(csv_buf)
+    csv_buf.seek(0)
+    b64 = base64.b64encode(csv_buf.read().encode()).decode()
+    return jsonify({'csv': b64, 'filename': 'deconvolution_results.csv'})
 
 # ── Start ─────────────────────────────────────────────────
 if __name__ == '__main__':

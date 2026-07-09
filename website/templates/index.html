@@ -29,6 +29,9 @@
     <button class="nav-tab" data-tab="gene_expr">🧬 基因表达</button>
     <button class="nav-tab" data-tab="immune">🛡️ 免疫检查点</button>
     <button class="nav-tab" data-tab="lr">🔗 受配体分析</button>
+    <button class="nav-tab" data-tab="lr">🔗 受配体分析</button>
+    <button class="nav-tab" data-tab="pseudotime">⏳ 拟时序</button>
+    <button class="nav-tab" data-tab="deconvolve">🧪 转录组标定</button>
     <button class="nav-tab" data-tab="custom">⚡ 自定义分析</button>
 </nav>
 
@@ -220,13 +223,92 @@
             </div>
         </div>
     </div>
+<div class="card">
+    <div class="card-title">🔗 受配体表达点图</div>
+    <div id="plot-lr-dotplot" class="plot-container"></div>
+</div>
+<div class="card">
+    <div class="card-title">🔄 细胞间通讯强度</div>
+    <div class="control-group" style="display:inline-block;width:auto">
+        <label>样本</label>
+        <select id="inter-sample" onchange="updateInteractionHeatmap()">
+            <option value="">全部</option>
+            <option value="ZLF">ZLF</option>
+            <option value="ZFL">ZFL</option>
+            <option value="HJX">HJX</option>
+        </select>
+    </div>
+    <div id="plot-inter-heatmap" class="plot-container" style="height:350px"></div>
+</div>
+</div>
+
+<!-- ========================= TAB 7: PSEUDOTIME ========================= -->
+<div class="tab-content" id="tab-pseudotime">
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-title">⏳ 拟时序轨迹</div>
+            <div class="control-group">
+                <label>UMAP 着色</label>
+                <select id="pt-color">
+                    <option value="dpt_pseudotime_norm">拟时序 (Pseudotime)</option>
+                    <option value="cell_type">细胞类型</option>
+                    <option value="sample">样本</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" onclick="updatePseudotime()">🔄 更新</button>
+        </div>
+        <div class="card">
+            <div class="card-title">🗺️ 拟时序 UMAP</div>
+            <div id="plot-pt-umap" class="plot-container" style="height:480px"></div>
+        </div>
+    </div>
     <div class="card">
-        <div class="card-title">🔗 受配体表达点图</div>
-        <div id="plot-lr-dotplot" class="plot-container"></div>
+        <div class="card-title">🔗 PAGA 轨迹图</div>
+        <div id="plot-pt-paga" class="plot-container" style="height:400px"></div>
     </div>
 </div>
 
-<!-- ========================= TAB 7: CUSTOM ANALYSIS ========================= -->
+<!-- ========================= TAB 8: DECONVOLUTION ========================= -->
+<div class="tab-content" id="tab-deconvolve">
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-title">🧪 转录组数据标定 (Deconvolution)</div>
+            <p style="font-size:13px;color:#666;margin-bottom:12px">
+                上传您的 bulk RNA-seq 表达矩阵（CSV/TSV 格式，基因为行名，样本为列名），
+                系统将利用 scRNA-seq 参考数据估算各细胞类型的比例。
+            </p>
+            <div class="control-group">
+                <label>选择文件（CSV 逗号分隔 / TSV 制表符分隔）</label>
+                <input type="file" id="decon-file" accept=".csv,.tsv" style="padding:8px;border:1px solid var(--border);border-radius:6px;width:100%">
+            </div>
+            <div class="control-group">
+                <label>基因匹配策略</label>
+                <select id="decon-strategy">
+                    <option value="all">所有共有基因</option>
+                    <option value="markers">仅标志基因（更稳健）</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" onclick="runDeconvolution()">🚀 运行标定</button>
+            <div style="margin-top:12px;font-size:12px;color:#999" id="decon-ref-info">参考数据: — 种细胞类型, — 个基因</div>
+        </div>
+        <div class="card">
+            <div class="card-title">📊 去卷积结果</div>
+            <div id="plot-decon-result" class="plot-container" style="min-height:300px">
+                <div class="loading">上传数据后运行标定</div>
+            </div>
+            <div class="download-bar" id="decon-download-bar" style="display:none">
+                <button class="btn btn-sm btn-success" onclick="downloadDeconImage()">📥 下载图片</button>
+                <button class="btn btn-sm btn-primary" onclick="downloadDeconCSV()">📥 下载比例表</button>
+            </div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-title">📋 基因匹配详情</div>
+        <div id="decon-overlap" style="font-size:13px;color:#666">等待运行...</div>
+    </div>
+</div>
+
+<!-- ========================= TAB 9: CUSTOM ========================= -->
 <div class="tab-content" id="tab-custom">
     <div class="grid-2">
         <div class="card">
