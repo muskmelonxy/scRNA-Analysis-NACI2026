@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>scRNA-seq 免疫分析探索平台</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+</head>
+<body>
+
+<!-- Header -->
+<header class="app-header">
+    <h1>🧬 scRNA-seq 免疫分析 <small>NACI2026 · 3 Samples</small></h1>
+    <div class="header-stats">
+        <span>🧫 <strong id="stat-cells">—</strong> cells</span>
+        <span>🧬 <strong id="stat-genes">—</strong> genes</span>
+        <span>🔬 <strong id="stat-samples">—</strong> samples</span>
+    </div>
+</header>
+
+<div class="container">
+
+<!-- Navigation -->
+<nav class="nav-tabs" id="navTabs">
+    <button class="nav-tab active" data-tab="overview">📊 概览</button>
+    <button class="nav-tab" data-tab="umap">🗺️ UMAP 探索</button>
+    <button class="nav-tab" data-tab="proportions">📈 细胞比例</button>
+    <button class="nav-tab" data-tab="gene_expr">🧬 基因表达</button>
+    <button class="nav-tab" data-tab="immune">🛡️ 免疫检查点</button>
+    <button class="nav-tab" data-tab="lr">🔗 受配体分析</button>
+    <button class="nav-tab" data-tab="custom">⚡ 自定义分析</button>
+</nav>
+
+<!-- ========================= TAB 1: OVERVIEW ========================= -->
+<div class="tab-content active" id="tab-overview">
+    <div class="grid-4">
+        <div class="card stat-card">
+            <div class="stat-value" id="ov-cells">—</div>
+            <div class="stat-label">总细胞数</div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value" id="ov-genes">—</div>
+            <div class="stat-label">检测基因数</div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value" id="ov-samples">3</div>
+            <div class="stat-label">样本数</div>
+        </div>
+        <div class="card stat-card">
+            <div class="stat-value" id="ov-ctypes">—</div>
+            <div class="stat-label">细胞类型</div>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-title">📊 细胞类型组成</div>
+            <div id="plot-overview-bar" class="plot-container"></div>
+        </div>
+        <div class="card">
+            <div class="card-title">📋 样本统计</div>
+            <table class="data-table" id="ov-sample-table">
+                <thead><tr><th>样本</th><th>细胞数</th><th>平均基因数</th><th>占比</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">🗺️ 细胞类型 UMAP 总览</div>
+        <div id="plot-overview-umap" class="plot-container"></div>
+        <div class="color-legend" id="ov-legend"></div>
+    </div>
+</div>
+
+<!-- ========================= TAB 2: UMAP ========================= -->
+<div class="tab-content" id="tab-umap">
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-title">🎨 着色方式</div>
+            <div class="control-group">
+                <label>颜色依据</label>
+                <select id="umap-color">
+                    <option value="cell_type">细胞类型</option>
+                    <option value="sample">样本</option>
+                    <option value="leiden">聚类(Leiden)</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>样本筛选</label>
+                <select id="umap-sample">
+                    <option value="">全部样本</option>
+                    <option value="ZLF">ZLF</option>
+                    <option value="ZFL">ZFL</option>
+                    <option value="HJX">HJX</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>细胞类型筛选</label>
+                <select id="umap-ct">
+                    <option value="">全部类型</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" onclick="updateUMAP()">🔄 更新</button>
+        </div>
+        <div class="card">
+            <div class="card-title">🗺️ UMAP 投影</div>
+            <div id="plot-umap" class="plot-container" style="height:500px"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ========================= TAB 3: PROPORTIONS ========================= -->
+<div class="tab-content" id="tab-proportions">
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-title">📊 细胞类型比例</div>
+            <div id="plot-prop-bar" class="plot-container"></div>
+            <div class="download-bar">
+                <button class="btn btn-sm btn-success" onclick="downloadTable('proportions')">📥 下载表格</button>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-title">🗺️ 按样本分面 UMAP</div>
+            <div id="plot-prop-umap" class="plot-container"></div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-title">📋 细胞类型 × 样本 明细表</div>
+        <table class="data-table" id="prop-table"><thead><tr><th>样本</th></tr></thead><tbody></tbody></table>
+    </div>
+</div>
+
+<!-- ========================= TAB 4: GENE EXPRESSION ========================= -->
+<div class="tab-content" id="tab-gene_expr">
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-title">🔍 基因探索</div>
+            <div class="control-group">
+                <label>输入基因名（支持模糊搜索）</label>
+                <input type="text" id="gene-search" placeholder="例如: CD3D, IFNG, PDCD1..." list="gene-list">
+                <datalist id="gene-list"></datalist>
+            </div>
+            <div class="control-group">
+                <label>常用免疫基因</label>
+                <div class="gene-tags" id="gene-quick-tags"></div>
+            </div>
+            <div class="control-group">
+                <label>样本筛选</label>
+                <select id="gene-sample"><option value="">全部</option>
+                    <option value="ZLF">ZLF</option><option value="ZFL">ZFL</option>
+                    <option value="HJX">HJX</option></select>
+            </div>
+            <button class="btn btn-primary" onclick="updateGeneExpr()">🔍 查询</button>
+        </div>
+        <div class="card">
+            <div class="card-title" id="gene-umap-title">🗺️ UMAP 表达</div>
+            <div id="plot-gene-umap" class="plot-container" style="height:400px">
+                <div class="loading">选择基因后显示</div>
+            </div>
+            <div class="download-bar">
+                <button class="btn btn-sm btn-success" onclick="downloadGeneExpr()">📥 下载表达表</button>
+            </div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-title">🎻 小提琴图（按细胞类型）</div>
+        <div id="plot-gene-violin" class="plot-container" style="height:350px">
+            <div class="loading">选择基因后显示</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-title">📈 各细胞类型表达水平</div>
+        <div id="plot-gene-bar" class="plot-container" style="height:300px">
+            <div class="loading">选择基因后显示</div>
+        </div>
+    </div>
+</div>
+
+<!-- ========================= TAB 5: IMMUNE CHECKPOINTS ========================= -->
+<div class="tab-content" id="tab-immune">
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-title">🛡️ 免疫检查点表达</div>
+            <div id="plot-immune-checkpoint" class="plot-container"></div>
+        </div>
+        <div class="card">
+            <div class="card-title">🧪 细胞因子表达</div>
+            <div id="plot-immune-cytokine" class="plot-container"></div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-title">🧬 趋化因子表达</div>
+        <div id="plot-immune-chemokine" class="plot-container"></div>
+        <div class="download-bar">
+            <button class="btn btn-sm btn-success" onclick="downloadTable('ct_expression')">📥 下载表达矩阵</button>
+        </div>
+    </div>
+</div>
+
+<!-- ========================= TAB 6: LR INTERACTION ========================= -->
+<div class="tab-content" id="tab-lr">
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-title">🔗 受配体互作</div>
+            <div class="control-group">
+                <label>样本</label>
+                <select id="lr-sample"><option value="">全部</option>
+                    <option value="ZLF">ZLF</option><option value="ZFL">ZFL</option>
+                    <option value="HJX">HJX</option></select>
+            </div>
+            <button class="btn btn-primary" onclick="updateLR()">🔄 更新</button>
+        </div>
+        <div class="card">
+            <div class="card-title">📊 互作得分 Top</div>
+            <div id="plot-lr-bar" class="plot-container" style="height:450px"></div>
+            <div class="download-bar">
+                <button class="btn btn-sm btn-success" onclick="downloadTable('lr_scores')">📥 下载表格</button>
+            </div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-title">🔗 受配体表达点图</div>
+        <div id="plot-lr-dotplot" class="plot-container"></div>
+    </div>
+</div>
+
+<!-- ========================= TAB 7: CUSTOM ANALYSIS ========================= -->
+<div class="tab-content" id="tab-custom">
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-title">⚙️ 自定义图表</div>
+            <div class="control-group">
+                <label>图表类型</label>
+                <select id="cust-type">
+                    <option value="dotplot">点图 (Dotplot)</option>
+                    <option value="violin">小提琴图 (Violin)</option>
+                    <option value="barplot">柱状图 (Barplot)</option>
+                    <option value="feature_umap">特征 UMAP</option>
+                </select>
+            </div>
+            <div class="control-group" id="cust-gene-group">
+                <label>基因选择（逗号分隔）</label>
+                <input type="text" id="cust-genes" placeholder="例如: CD3D, CD4, CD8A">
+            </div>
+            <div class="control-group" id="cust-groupby-group">
+                <label>分组方式</label>
+                <select id="cust-groupby">
+                    <option value="cell_type">细胞类型</option>
+                    <option value="sample">样本</option>
+                    <option value="leiden">聚类</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>标题</label>
+                <input type="text" id="cust-title" placeholder="自定义图表标题">
+            </div>
+            <button class="btn btn-primary" onclick="generateCustomPlot()">⚡ 生成图表</button>
+        </div>
+        <div class="card">
+            <div class="card-title" id="cust-result-title">📊 生成的图表</div>
+            <div id="plot-custom-result" class="plot-container" style="min-height:300px">
+                <div class="loading">配置参数后点击生成</div>
+            </div>
+            <div class="download-bar" id="cust-download-bar" style="display:none">
+                <button class="btn btn-sm btn-success" onclick="downloadCustomPlot()">📥 下载图片 (PNG)</button>
+                <button class="btn btn-sm btn-primary" id="cust-csv-btn" onclick="downloadCustomCSV()">📥 下载数据 (CSV)</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+</div><!-- container -->
+
+<!-- Toast -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="/static/js/main.js"></script>
+</body>
+</html>

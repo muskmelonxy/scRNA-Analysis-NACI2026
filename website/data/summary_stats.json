@@ -1,0 +1,33 @@
+{
+  "total_cells": 32030,
+  "total_genes": 41911,
+  "samples": [
+    "ZLF",
+    "ZFL",
+    "HJX"
+  ],
+  "cell_types": {
+    "Epithelial": 14595,
+    "T_cells": 8781,
+    "NK": 253,
+    "Myeloid": 2311,
+    "B_Plasma": 3104,
+    "Fibroblasts": 1529,
+    "Endothelial": 1265,
+    "Mast": 192
+  },
+  "per_sample": {
+    "ZLF": {
+      "cells": 13449,
+      "mean_genes": 2736.14521525764
+    },
+    "ZFL": {
+      "cells": 12898,
+      "mean_genes": 2728.3008218328423
+    },
+    "HJX": {
+      "cells": 5683,
+      "mean_genes": 1845.92275206757
+    }
+  }
+}

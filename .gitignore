@@ -1,0 +1,22 @@
+# Raw data (download from source)
+data/matrix/
+# macOS
+.DS_Store
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.eggs/
+# Jupyter
+.ipynb_checkpoints/
+# User-generated plots (transient)
+website/user_plots/*
+# Environment
+.venv/
+venv/
+env/
+# IDE
+.vscode/
+.idea/
+# Logs
+*.log

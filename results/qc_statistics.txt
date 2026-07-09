@@ -1,0 +1,4 @@
+sample	CellCount	MeanGenes
+HJX	5683	1845.92
+ZFL	12898	2728.3
+ZLF	13449	2736.15
